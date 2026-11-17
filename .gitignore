@@ -1,0 +1,10 @@
+# secrets and local config: never commit
+.env
+.env.*
+# python
+__pycache__/
+*.pyc
+# editors / os
+.vscode/
+.idea/
+.DS_Store
