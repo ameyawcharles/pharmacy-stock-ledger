@@ -1,4 +1,5 @@
 # Pharmacy stock ledger
+![ci](https://github.com/ameyawcharles/pharmacy-stock-ledger/actions/workflows/ci.yml/badge.svg)
 
 A PostgreSQL reference implementation of **pharmacy stock control** that cannot oversell, cannot sell expired
 stock, cannot be double-charged by a retry, and keeps a history nobody can rewrite.
