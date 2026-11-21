@@ -206,3 +206,7 @@ through `rpc`:
 - Offline-tolerant selling: a local queue, idempotent sync, explicit conflict rules for stock.
 - Multi-pharmacy tenancy with row-level security by membership.
 - A verified mobile-money payment flow built on the same ledger.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
