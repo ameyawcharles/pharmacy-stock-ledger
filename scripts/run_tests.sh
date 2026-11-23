@@ -18,4 +18,6 @@ for f in db/migrations/*.sql; do
   psql -q -v ON_ERROR_STOP=1 -1 -d "$DB" -f "$f"
 done
 
-PG_DSN="host=$PGHOST dbname=$DB user=$PGUSER password=${PGPASSWORD:-}" python3 tests/harness.py
+export PG_DSN="host=$PGHOST dbname=$DB user=$PGUSER password=${PGPASSWORD:-}"
+python3 tests/harness.py            # stock ledger and checkout
+python3 tests/offline_harness.py    # offline selling

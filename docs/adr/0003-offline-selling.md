@@ -1,6 +1,6 @@
 # ADR 0003: Offline selling
 
-- Status: **proposed**. Waiting on the four decisions in "Decisions to confirm".
+- Status: **accepted**. Implemented in `db/migrations/004_offline_sales.sql` and tested in `tests/offline_harness.py`.
 - Builds on: ADR 0001 (atomic, idempotent checkout) and ADR 0002 (stock ledger over batches)
 
 ## Context
@@ -63,14 +63,16 @@ stateDiagram-v2
 ```
 
 - **RESOLVED_FOUND** inserts a `SALE` ledger row for the missing quantity from a batch the pharmacist chooses,
-  and a `sale_item_batches` row, so a later void returns it correctly.
+  and a `sale_item_batches` row, so a later void returns it correctly. If the chosen batch holds fewer units than
+  the shortfall, a `CORRECTION` for the difference is recorded first, because the stock was found.
 - **WRITTEN_OFF** inserts no stock movement. It records that the ledger had overstated stock and the sale stands.
   A reason is required.
 - **VOIDED** happens when `void_sale` runs on the sale. Allocated stock returns; the shortfall closes.
 
 ### New invariant
 
-For every sale line: `sale_items.quantity = (sum of its batch allocations) + (sum of its shortfalls)`.
+For every sale line: `sale_items.quantity = (sum of its batch allocations) + (sum of its shortfalls that are not
+RESOLVED_FOUND)`. A resolved-found shortfall has moved into the allocations, so it is not counted twice.
 `verify_stock_integrity()` is extended to report any line where that does not hold. The existing ledger
 invariants are unchanged.
 
@@ -142,9 +144,27 @@ cannot lose it. The device sends the oldest first and retries with backoff. It k
 | Sale after the device was revoked | Rejected with `DEVICE_REVOKED` |
 | Random mix of devices, duplicates, replays and resolutions | Ledger, batch and product totals agree; every line satisfies the invariant |
 
-## Decisions to confirm
+## Decisions
 
-1. **Oversell policy:** accept the sale and record a shortfall (recommended), or reject it.
-2. **Payments offline:** cash only (recommended), or allow others and flag them for later verification.
-3. **Price mismatch:** record the price paid and flag it (recommended), or force the server price.
-4. **Long offline sales:** accept and flag after a set number of hours (recommended), or reject.
+Confirmed by the owner:
+
+1. **Oversell policy:** accept the sale and record a shortfall.
+2. **Payments offline:** cash only.
+3. **Price mismatch:** record the price paid and flag it.
+4. **Long offline sales:** accept and flag them.
+
+## Implementation notes
+
+- `allocate_stock` is the one allocator. `create_sale` calls it and refuses a shortage; `submit_offline_sale` calls
+  it and records one. The refactor of `create_sale` changed no behaviour: the existing 84 checks pass unchanged.
+- Thresholds are constants in `submit_offline_sale`: a device clock more than **15 minutes** ahead of the server is
+  `CLOCK_SKEW`; a sale older than **72 hours** is `LONG_OFFLINE`.
+- Devices are registered and revoked by staff (`register_device`, `revoke_device`). A sale is rejected with
+  `DEVICE_REVOKED` only if `occurredAt` is after the revocation, and a replay of an already accepted sale always
+  returns the original.
+- Removing a user means they cannot submit (`FORBIDDEN`). The `users` table has no deactivation flag yet.
+- Lines for the same product must carry one price; the same product at two prices in one sale is rejected,
+  because the allocator would run twice before stock is updated.
+- A product that has since been deactivated is still accepted offline: the sale already happened.
+- The sale number is assigned by the server at sync. The device's own receipt number is stored as
+  `clientReceiptNumber`.

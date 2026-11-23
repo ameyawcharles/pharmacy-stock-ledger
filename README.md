@@ -101,13 +101,15 @@ ERROR:  permission denied for table stock_movements
 | History cannot be rewritten | Ledger rows are immutable, even for a superuser | 5 |
 | Carts that overlap never deadlock | One global lock order: products, then batches by expiry | 8: 250 opposite-order multi-batch carts |
 | Failures leave no trace | One transaction per sale | 9 |
-| The numbers add up | `verify_stock_integrity()` recomputes ledger, batches and products | 10 and 11 |
+| The numbers add up | `verify_stock_integrity()` recomputes ledger, batches and products, and checks every sale line | 10 and 11 |
+| A sale made offline is recorded once, however often it is sent | Idempotent on (device, client sale id); order does not matter | `tests/offline_harness.py` 1, 2, 11 |
+| A shortage at sync time never loses a sale or breaks the ledger | Recorded as a shortfall for a pharmacist to resolve; stock never goes negative | `tests/offline_harness.py` 3, 5, 6 |
 
 Test 10 is a randomised concurrent mix of sales, receipts, damage write-offs and voids. It ends by
 checking that the ledger, the batch balances and the product totals agree, and that for every product
 *initial stock + received = on hand + sold*.
 
-**84 checks, all passing** on PostgreSQL 16. Run them with `bash scripts/run_tests.sh`; the GitHub Actions
+**163 checks, all passing** on PostgreSQL 16 (84 for stock and checkout, 79 for offline selling). Run them with `bash scripts/run_tests.sh`; the GitHub Actions
 workflow in `.github/workflows/ci.yml` runs them on every push.
 
 ## How it works
@@ -161,6 +163,7 @@ Each has a written record with the problem, the alternatives considered and the 
 
 - [ADR 0001: checkout and void as Postgres functions](docs/adr/0001-atomic-checkout-in-the-database.md)
 - [ADR 0002: a stock ledger over batches, first-expiry-first-out](docs/adr/0002-stock-ledger-and-batches.md)
+- [ADR 0003: offline selling, with shortfalls instead of refusals](docs/adr/0003-offline-selling.md)
 
 ## Repository layout
 
@@ -169,9 +172,11 @@ db/migrations/
   001_core_schema.sql              users, products, suppliers, sales, row-level security
   002_stock_ledger_and_batches.sql ledger, batches, triggers, receive/adjust, integrity check
   003_checkout.sql                 create_sale and void_sale
+  004_offline_sales.sql            submit_offline_sale, shortfalls, devices
 db/seed/demo_seed.sql              synthetic demo data
 db/test-support/stub_auth.sql      fakes Supabase's auth schema on a plain Postgres
 tests/harness.py                   the concurrency and correctness suite
+tests/offline_harness.py           the offline-selling suite
 demo/walkthrough.sql               the guided tour above
 scripts/                           run_tests.sh, demo.sh
 docs/adr/                          architecture decision records
@@ -190,12 +195,16 @@ through `rpc`:
 | `adjust_stock(batch, delta, type, reason, ...)` | admin, pharmacist | damage, expiry write-off, supplier return, count correction |
 | `create_sale(items, payment_method, discount, notes, idempotency_key)` | any signed-in user | checkout |
 | `void_sale(sale, reason)` | admin, pharmacist | void and return stock |
-| `verify_stock_integrity()` | admin, pharmacist | list any mismatch between ledger and cached totals |
+| `verify_stock_integrity()` | admin, pharmacist | list any mismatch between ledger and cached totals, or in a sale line |
+| `submit_offline_sale(device, client_sale_id, occurred_at, items, ...)` | any signed-in user | record a cash sale made offline; idempotent; a shortage becomes a shortfall |
+| `resolve_shortfall(shortfall, action, batch, reason)` | admin, pharmacist | close a shortfall: the stock was found, or the stock record was wrong |
+| `register_device(name)`, `revoke_device(id)` | admin, pharmacist | manage tills |
 
 ## Limits
 
 - **Single pharmacy.** There is no tenant model. All sales of a day briefly serialise on one counter row.
 - **Payments are not verified.** The payment method is recorded, not checked against a payment provider.
+- **Offline sales are cash only.** Mobile money and card cannot be verified without a connection.
 - **Time zone** is `Africa/Accra`, set inside the functions. Change it there for another zone.
 - **A superuser or the service role can bypass** the guard on the cached columns. That is deliberate for
   repairs, and `verify_stock_integrity()` detects it. The ledger itself stays immutable.
@@ -203,7 +212,7 @@ through `rpc`:
 
 ## Roadmap
 
-- Offline-tolerant selling: a local queue, idempotent sync, explicit conflict rules for stock.
+- A client for offline selling: a local queue on the device that syncs through `submit_offline_sale`. The server side is built (ADR 0003).
 - Multi-pharmacy tenancy with row-level security by membership.
 - A verified mobile-money payment flow built on the same ledger.
 
