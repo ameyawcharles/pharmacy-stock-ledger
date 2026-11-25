@@ -38,3 +38,14 @@ jobs:
         run: bash scripts/run_tests.sh
       - name: Run the demo (must finish without a script error)
         run: bash scripts/demo.sh
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+      - name: Device client (TypeScript) - install, type-check, test against the database
+        working-directory: client
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
