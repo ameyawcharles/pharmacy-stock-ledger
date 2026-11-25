@@ -109,7 +109,7 @@ Test 10 is a randomised concurrent mix of sales, receipts, damage write-offs and
 checking that the ledger, the batch balances and the product totals agree, and that for every product
 *initial stock + received = on hand + sold*.
 
-**163 checks, all passing** on PostgreSQL 16 (84 for stock and checkout, 79 for offline selling). Run them with `bash scripts/run_tests.sh`; the GitHub Actions
+**231 checks, all passing** on PostgreSQL 16: 84 for stock and checkout, 79 for offline selling, and 68 for the TypeScript device client. Run them with `bash scripts/run_tests.sh`; the GitHub Actions
 workflow in `.github/workflows/ci.yml` runs them on every push.
 
 ## How it works
@@ -177,6 +177,7 @@ db/seed/demo_seed.sql              synthetic demo data
 db/test-support/stub_auth.sql      fakes Supabase's auth schema on a plain Postgres
 tests/harness.py                   the concurrency and correctness suite
 tests/offline_harness.py           the offline-selling suite
+client/                            TypeScript queue and sync engine for the till, with its own tests
 demo/walkthrough.sql               the guided tour above
 scripts/                           run_tests.sh, demo.sh
 docs/adr/                          architecture decision records
@@ -200,6 +201,13 @@ through `rpc`:
 | `resolve_shortfall(shortfall, action, batch, reason)` | admin, pharmacist | close a shortfall: the stock was found, or the stock record was wrong |
 | `register_device(name)`, `revoke_device(id)` | admin, pharmacist | manage tills |
 
+## Device client
+
+`client/` is a TypeScript package for the till: a queue that saves each sale before the receipt is shown, and a sync
+engine that sends the queue oldest first, retries with backoff, parks a refused sale without blocking the rest, and
+stops cleanly when the sign-in expires. It is tested against the real database with failures injected: a dropped
+connection, a lost acknowledgment, a crash after the server recorded the sale. See [client/README.md](client/README.md).
+
 ## Limits
 
 - **Single pharmacy.** There is no tenant model. All sales of a day briefly serialise on one counter row.
@@ -212,7 +220,7 @@ through `rpc`:
 
 ## Roadmap
 
-- A client for offline selling: a local queue on the device that syncs through `submit_offline_sale`. The server side is built (ADR 0003).
+- Put the device client to work in an application: a POS screen that sells offline, and a screen where a pharmacist works through open shortfalls.
 - Multi-pharmacy tenancy with row-level security by membership.
 - A verified mobile-money payment flow built on the same ledger.
 

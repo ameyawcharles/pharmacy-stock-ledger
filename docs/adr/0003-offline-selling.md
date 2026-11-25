@@ -111,6 +111,10 @@ or `REJECTED` (kept, needs a person). A sale is written to the outbox before the
 cannot lose it. The device sends the oldest first and retries with backoff. It keeps a stock snapshot with an
 `asOf` time to warn the cashier, and it warns but does not block, because the shelf is the truth.
 
+This contract is implemented in `client/` (TypeScript). Two details the design settled: a sale stays in storage as
+`SENDING` while a send is in flight and is removed only after the acknowledgment, and an expired sign-in
+(`UNAUTHORIZED`) stops the queue instead of rejecting sales, because the sale itself is not at fault.
+
 ## Alternatives considered
 
 1. **Reject the sale when stock is short.** Simple, but the medicine is already gone. The record would say it
